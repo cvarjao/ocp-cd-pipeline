@@ -1,5 +1,7 @@
 package ca.bc.gov.devops
 
+import groovy.cli.picocli.OptionAccessor
+
 class OpenShiftHelper{
     protected Map cache = [:] //Indexed by key
     boolean hasError=false
@@ -100,7 +102,7 @@ class OpenShiftHelper{
                     }
 
                     if (gitRemoteUri.equalsIgnoreCase(it.spec.source?.git?.uri) && it.spec?.source?.contextDir != null){
-                        it.metadata.labels['tree-hash'] = ['git', 'log', '-1', '--pretty=format:%T', '--', "../${it.spec?.source?.contextDir}"].execute().text
+                        it.metadata.labels['tree-hash'] = _exec(['git', 'log', '-1', '--pretty=format:%T', '--', "${it.spec?.source?.contextDir}"]).out.toString().trim()
                     }
                     it.spec.triggers = [] //it.spec.triggers.findAll({!'ConfigChange'.equalsIgnoreCase(it.type)})
                     Map strategyOptions=it.spec.strategy.sourceStrategy?:it.spec.strategy.dockerStrategy
@@ -132,8 +134,32 @@ class OpenShiftHelper{
         }
         return templates
     } //end function
+    public static Map _exec(List args){
+        return _exec(args, new StringBuffer(), new StringBuffer())
+    }
+    public boolean waitForPodsToComplete(List ocGetAgs){
+        int inprogress=1
+        boolean hasFailed=false;
 
-    public static Map _exec(List args, StringBuffer stdout, StringBuffer stderr, Closure stdin=null){
+        while(inprogress>0){
+            Map pods = ocGet(ocGetAgs)
+            inprogress=0
+            for (Map pod:pods.items){
+                if ('Failed' == pod.status.phase || 'Cancelled' == pod.status.phase) {
+                    hasFailed = true
+                    continue
+                }
+                if ('Succeeded' == pod.status.phase) continue
+                println "Waiting for '${pod.metadata.name}' (${pod.status.phase})"
+                OpenShiftHelper._exec(["bash", '-c', "oc logs -f pod/'${pod.metadata.name}' '--namespace=${pod.metadata.namespace}' > /dev/null"], new StringBuffer(), new StringBuffer())
+                //OpenShiftHelper._exec(["bash", '-c', "oc attach '${pod.metadata.name}' '--namespace=${pod.metadata.namespace}' > /dev/null"], new StringBuffer(), new StringBuffer())
+                inprogress++
+            }
+            Thread.sleep(2000)
+        }
+        return !hasFailed
+    }
+    public static Map _exec(List args, Appendable stdout, Appendable stderr, Closure stdin=null){
         java.time.Instant startInstant = java.time.Instant.now()
         def proc = args.execute()
 
@@ -160,11 +186,11 @@ class OpenShiftHelper{
         return oc(args, new StringBuffer(), new StringBuffer())
     }
     
-    public static Map oc(List args, StringBuffer stdout){
+    public static Map oc(List args, Appendable stdout){
         return oc(args, stdout, stdout)
     }
 
-    public static Map oc(List args, StringBuffer stdout, StringBuffer stderr){
+    public static Map oc(List args, Appendable stdout, Appendable stderr){
         List _args = ['oc'];
         _args.addAll(args)
 
@@ -253,5 +279,21 @@ class OpenShiftHelper{
 
         strategyConfig.env.add(env)
     }
+    public static Map loadDeploymentConfig(OptionAccessor opt){
+        println "Loading configuration file for '${opt.e}' ${opt.'pr'}"
+        def configFile = new File(opt.c)
 
+        def varsConfigSlurper = new ConfigSlurper(opt.e)
+        varsConfigSlurper.setBinding(['opt': opt])
+
+        def varsConfig = varsConfigSlurper.parse(new File(opt.c).toURI().toURL())
+
+        def configSlurper = new ConfigSlurper(opt.e)
+        configSlurper.setBinding(['opt': opt, 'vars': varsConfig.vars])
+
+        def config = configSlurper.parse(new File(opt.c).toURI().toURL())
+        config.opt = opt
+
+        return config
+    }
 }

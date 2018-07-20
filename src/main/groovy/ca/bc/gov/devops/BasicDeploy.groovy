@@ -37,22 +37,13 @@ abstract class BasicDeploy extends Script {
             return 0
         }
 
-        println "Loading configuration file for '${opt.e}' ${opt.'pr'}"
-        def configFile = new File(opt.c)
 
-        def varsConfigSlurper = new ConfigSlurper(opt.e)
-        varsConfigSlurper.setBinding(['opt': opt])
-
-        def varsConfig = varsConfigSlurper.parse(new File(opt.c).toURI().toURL())
-
-        def configSlurper = new ConfigSlurper(opt.e)
-        configSlurper.setBinding(['opt': opt, 'vars': varsConfig.vars])
-
-        def config = configSlurper.parse(new File(opt.c).toURI().toURL())
-        config.opt = opt
+        def config = OpenShiftHelper.loadDeploymentConfig(opt)
 
         println config
-
+        //TODO:Verify access to the project/namespace
+        //system:serviceaccount:empr-mds-tools:jenkins
+        //println "oc policy add-role-to-user edit `oc whoami` -n ${config.app.deployment.namespace}"
         new OpenShiftDeploymentHelper(config).deploy()
 
     }

@@ -31,6 +31,11 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
                 println "Preparing ${key(object)}  (${object.metadata.namespace})"
                 object.metadata.labels['app-name'] = config.app.name
                 if (!'true'.equalsIgnoreCase(object.metadata.labels['shared'])){
+                    if (config.app.git.uri.toLowerCase().startsWith('https://github.com/')) {
+                        object.metadata.labels['github-owner'] = config.app.git.uri.tokenize('/')[2]
+                        object.metadata.labels['github-repo'] = config.app.git.uri.tokenize('/')[3].tokenize('.git')[0]
+                        object.metadata.labels['github-pull-request'] = config.app.git.changeId
+                    }
                     object.metadata.labels['env-name'] = deploymentConfig.name
                     object.metadata.labels['app'] =  object.metadata.labels['app-name'] + '-' + object.metadata.labels['env-name']
                 }
@@ -82,7 +87,8 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
                             }
                         }
                     }
-
+                }else if (object.kind == 'Route'){
+                    //TODO: Some fields (spec.host) in the Route are immutable. We may need to delete and recreate
                 }
             }
         }
@@ -99,6 +105,40 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
                 System.exit(ret.status)
             }
         }
+
+        List deployments = []
+        templates.each { Map template ->
+            for (Map object : template.objects) {
+                if (object.kind == 'DeploymentConfig') {
+                    deployments.add(object)
+                }
+            }
+        }
+
+        //Wait for all deployments to complete
+        int attempt = 0
+        while (deployments.size()>0) {
+            Iterator<Map> iterator = deployments.iterator();
+            while (iterator.hasNext()) {
+                Map object = iterator.next();
+                Map dc = ocGet([object.kind, "${object.metadata.name}",  '-n', object.metadata.namespace])
+                println "${key(dc)} - desired:${dc?.status?.replicas}  ready:${dc?.status?.readyReplicas} available:${dc?.status?.availableReplicas}"
+                if ((dc?.status?.replicas == dc?.status?.readyReplicas &&  dc?.status?.replicas == dc?.status?.availableReplicas)) {
+                    iterator.remove()
+                }
+            }
+            int sleepMin =1
+            int sleepCap = 5
+            int sleepBase = 1
+            int sleepBackoff = 4
+            int sleepTime=Math.max(sleepMin, Math.min(sleepCap, sleepBase * ((Math.pow(2, attempt / sleepBackoff))-1)))* 1000
+
+            println "Sleeping for ${sleepTime}ms"
+            Thread.sleep(sleepTime)
+            attempt++
+        }
+
+
 
     } //end applyBuildConfig
 

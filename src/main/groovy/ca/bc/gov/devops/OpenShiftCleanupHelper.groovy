@@ -44,7 +44,7 @@ class OpenShiftCleanupHelper extends OpenShiftHelper{
         println 'Removing all objects created by the buildConfig...'
 
         // deletes all resources labelled as app-env=mylabel
-        oc(['delete', 'all', '-l', "env-name=${config.app.build.name}", '-n', "${namespace}"])
+        oc(['delete', 'all', '-l', "env-name=${config.app.name}-${config.app.changeId}", '-n', "${namespace}"])
 
         // removes tags in shared imagestreams corresponfing to the build
         removeTagsFromSharedImageStreams(namespace)
