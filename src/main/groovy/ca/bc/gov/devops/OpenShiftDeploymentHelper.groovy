@@ -112,6 +112,8 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
             }
         }
 
+        Thread.sleep(2000) // Wait for OpenShift to identify changes and catchup
+
         //Wait for all deployments to complete
         int attempt = 0
         while (deployments.size()>0) {
