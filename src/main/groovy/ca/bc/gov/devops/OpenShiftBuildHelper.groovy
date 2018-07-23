@@ -241,21 +241,11 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
         return newItems
     }
 
-    private static void applyBuildConfig(Map config, List templates){
+    private void applyBuildConfig(Map config, List templates){
         println 'Applying Build Templates ...'
         templates.each { Map template ->
             template.objects.each { object ->
-                object.metadata.labels['app-name'] = config.app.name
-
-                if (!'true'.equalsIgnoreCase(object.metadata.labels['shared'])){
-                    if (config.app.git.uri.toLowerCase().startsWith('https://github.com/')) {
-                        object.metadata.labels['github-owner'] = config.app.git.uri.tokenize('/')[2]
-                        object.metadata.labels['github-repo'] = config.app.git.uri.tokenize('/')[3].tokenize('.git')[0]
-                        object.metadata.labels['github-pull-request'] = config.app.git.changeId
-                    }
-                    object.metadata.labels['env-name'] = config.app.build.name
-                    object.metadata.labels['app'] =  object.metadata.labels['app-name'] + '-' + object.metadata.labels['env-name']
-                }
+                applyCommonTemplateConfig(config, config.app.build, object)
 
                 if (object.kind == 'BuildConfig'){
                     if (config.app.git.uri.equalsIgnoreCase(object.spec?.source?.git?.uri)){
@@ -264,6 +254,7 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
                 }
             }
 
+            //println new groovy.json.JsonBuilder(template.objects).toPrettyString()
             Map ret= ocApply(template.objects, ['-n', config.app.build.namespace])
 
             if (ret.status != 0) {
@@ -276,7 +267,8 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
     private List loadBuildTemplates(Map config){
         Map parameters =[
                 'NAME_SUFFIX':config.app.build.suffix,
-                'ENV_NAME': config.app.build.name,
+                'ENV_NAME': config.app.build.env.name,
+                'ENV_ID': config.app.build.env.id,
                 'SOURCE_REPOSITORY_URL': config.app.git.uri,
                 'SOURCE_REPOSITORY_REF': config.app.git.ref
         ]
@@ -306,6 +298,8 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
         //println cache
         def lookupImageStreamByImageStreamTag = {Map refImageStreamTag ->
             //println "> lookupImageStreamByImageStreamTag () - ${refImageStreamTag}"
+            if ('DockerImage' == refImageStreamTag.kind) return null
+
             String outputImageStreamTagGuid = OpenShiftHelper.guid(refImageStreamTag)
             Map outputImageStreamTagEntry = cache[outputImageStreamTagGuid]
             if (outputImageStreamTagEntry == null ) {
@@ -356,8 +350,10 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
                 //println "Dependencies ${OpenShiftHelper.guid(object)}"
                 List dependencies = []
                 Map entry1=lookupImageStreamByImageStreamTag(object.spec?.strategy?.dockerStrategy?.from?:object.spec?.strategy?.sourceStrategy?.from)
-                if (entry1['buildConfig']!=null){
-                    dependencies.add(entry1['buildConfig'])
+                if (entry1!=null) {
+                    if (entry1['buildConfig'] != null) {
+                        dependencies.add(entry1['buildConfig'])
+                    }
                 }
 
                 for (Map image:object.spec?.source?.images){
@@ -454,13 +450,13 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
                         //println images
                         //List images=getImageStreamTagByBuildHash(outputTo, buildHash)
                         //System.exit(1)
-                        object.metadata.annotations['build-hash-checksum'] = buildChecksum.checksum
-                        object.metadata.annotations['build-hash-source'] = buildChecksum.source
-                        ocApply([object], ['-n', config.app.build.namespace])
+                        //object.metadata.annotations['build-hash-checksum'] = buildChecksum.checksum
+                        //object.metadata.annotations['build-hash-source'] = buildChecksum.source
+                        //ocApply([object], ['-n', config.app.build.namespace])
 
                         if (images.size() == 0){
                             addBuildConfigEnv(object, [name:'_BUILD_HASH', value:buildHash])
-                            object.metadata.annotations['build-hash-checksum'] = buildChecksum.checksum
+                            object.metadata.annotations['build-hash'] = buildChecksum.checksum
                             object.metadata.annotations['build-hash-source'] = buildChecksum.source
                             Map ocApplyRet=ocApply([object], ['-n', config.app.build.namespace])
                             //Start New Build
@@ -531,7 +527,7 @@ class OpenShiftBuildHelper extends OpenShiftHelper{
             }
             //println "Sleeping for ${sleepInSeconds} seconds"
             //Thread.sleep(sleepInSeconds * 1000) // 4 seconds
-            println "Elapsed Seconds: ${duration.getSeconds()} (max = ${config.app.build.timeoutInSeconds})"
+            //println "Elapsed Seconds: ${duration.getSeconds()} (max = ${config.app.build.timeoutInSeconds})"
             if (duration.getSeconds() > config.app.build.timeoutInSeconds) throw new java.util.concurrent.TimeoutException("Expected to take no more than ${config.app.build.timeoutInSeconds} seconds.")
         } // end while(true)
         duration = java.time.Duration.between(startInstant, java.time.Instant.now())

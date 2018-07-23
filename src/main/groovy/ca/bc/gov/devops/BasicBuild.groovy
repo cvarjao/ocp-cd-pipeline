@@ -38,12 +38,8 @@ abstract class BasicBuild extends Script {
             return 0
         }
 
-        def configSlurper = new ConfigSlurper("build")
-        configSlurper.setBinding(['opt': opt])
+        def config = OpenShiftHelper.loadBuildConfig(opt)
 
-        def config = configSlurper.parse(new File(opt.c).toURI().toURL())
-
-        println config
         new OpenShiftBuildHelper(config).build()
 
 

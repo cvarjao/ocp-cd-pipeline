@@ -40,7 +40,7 @@ abstract class BasicDeploy extends Script {
 
         def config = OpenShiftHelper.loadDeploymentConfig(opt)
 
-        println config
+        //println config
         //TODO:Verify access to the project/namespace
         //system:serviceaccount:empr-mds-tools:jenkins
         //println "oc policy add-role-to-user edit `oc whoami` -n ${config.app.deployment.namespace}"

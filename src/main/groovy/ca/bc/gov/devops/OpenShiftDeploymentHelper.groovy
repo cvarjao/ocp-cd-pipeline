@@ -14,8 +14,10 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
     private List loadDeploymentTemplates(){
         Map parameters =[
                 'NAME_SUFFIX':config.app.deployment.suffix,
-                'ENV_NAME': config.app.deployment.name,
-                'BUILD_ENV_NAME': config.app.build.name
+                'ENV_NAME': config.app.deployment.env.name,
+                'ENV_ID': config.app.deployment.env.id,
+                'BUILD_ENV_NAME': config.app.build.env.name,
+                'BUILD_ENV_ID': config.app.build.env.name
         ]
         return loadTemplates(config, config.app.deployment, parameters)
     }
@@ -29,16 +31,8 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
             println "Preparing ${template.file}"
             template.objects.each { Map object ->
                 println "Preparing ${key(object)}  (${object.metadata.namespace})"
-                object.metadata.labels['app-name'] = config.app.name
-                if (!'true'.equalsIgnoreCase(object.metadata.labels['shared'])){
-                    if (config.app.git.uri.toLowerCase().startsWith('https://github.com/')) {
-                        object.metadata.labels['github-owner'] = config.app.git.uri.tokenize('/')[2]
-                        object.metadata.labels['github-repo'] = config.app.git.uri.tokenize('/')[3].tokenize('.git')[0]
-                        object.metadata.labels['github-pull-request'] = config.app.git.changeId
-                    }
-                    object.metadata.labels['env-name'] = deploymentConfig.name
-                    object.metadata.labels['app'] =  object.metadata.labels['app-name'] + '-' + object.metadata.labels['env-name']
-                }
+                applyCommonTemplateConfig(config, deploymentConfig, object)
+
                 String asCopyOf = object.metadata.annotations['as-copy-of']
 
                 if ((object.kind == 'Secret' || object.kind == 'ConfigMap') &&  asCopyOf!=null){
@@ -51,8 +45,8 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
                     }
                 }else if (object.kind == 'ImageStream'){
                     //retrieve image from the tools project
-                    String buildImageStreamTagName = "${object.metadata.name}:${config.app.build.name}"
-                    String deploymageStreamTagName = "${object.metadata.name}:${deploymentConfig.name}"
+                    String buildImageStreamTagName = "${object.metadata.name}:${config.app.build.version}"
+                    String deploymageStreamTagName = "${object.metadata.name}:${deploymentConfig.version}"
                     Map buildImageStreamTag = ocGet(['ImageStreamTag', "${buildImageStreamTagName}",'--ignore-not-found=true',  '-n', config.app.build.namespace])
                     Map deployImageStreamTag = ocGet(['ImageStreamTag', "${deploymageStreamTagName}",'--ignore-not-found=true',  '-n', object.metadata.namespace])
                     if (deployImageStreamTag == null){
@@ -99,6 +93,9 @@ class OpenShiftDeploymentHelper extends OpenShiftHelper{
 
         templates.each { Map template ->
             println "Applying ${template.file}"
+
+            //println new groovy.json.JsonBuilder(template.objects).toPrettyString()
+
             Map ret= ocApply(template.objects, ['-n', deploymentConfig.namespace, '--force=true'])
             if (ret.status != 0) {
                 println ret

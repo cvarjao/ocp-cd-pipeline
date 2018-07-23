@@ -39,6 +39,24 @@ class OpenShiftHelper{
         println message
         System.exit(1)
     }
+
+    public void applyCommonTemplateConfig(Map config, Map envConfig, Map object){
+        object.metadata.labels['app-name'] = config.app.name
+        if (!'true'.equalsIgnoreCase(object.metadata.labels['shared'])){
+            if (config.app.git.uri.toLowerCase().startsWith('https://github.com/')) {
+                object.metadata.labels['github-owner'] = config.app.git.uri.tokenize('/')[2]
+                object.metadata.labels['github-repo'] = config.app.git.uri.tokenize('/')[3].tokenize('.git')[0]
+            }
+
+            if (config.app?.git?.changeId){
+                object.metadata.labels['change-id'] = config.app.git.changeId
+            }
+            object.metadata.labels['env-name'] = envConfig.env.name
+            object.metadata.labels['env-id'] = envConfig.env.id
+            object.metadata.labels['app'] =  envConfig.id
+        }
+    }
+
     public List loadTemplates(Map globalConfig, Map templateConfig, Map parameters){
         List templates = templateConfig.templates
         String gitRemoteUri=globalConfig.app.git.uri
@@ -102,7 +120,8 @@ class OpenShiftHelper{
                     }
 
                     if (gitRemoteUri.equalsIgnoreCase(it.spec.source?.git?.uri) && it.spec?.source?.contextDir != null){
-                        it.metadata.labels['tree-hash'] = _exec(['git', 'log', '-1', '--pretty=format:%T', '--', "${it.spec?.source?.contextDir}"]).out.toString().trim()
+                        String getTreeHash=_exec(['git', 'ls-tree', 'HEAD', '--', "${it.spec?.source?.contextDir}"]).out.toString().trim().tokenize()[2]
+                        it.metadata.labels['tree-hash'] = getTreeHash
                     }
                     it.spec.triggers = [] //it.spec.triggers.findAll({!'ConfigChange'.equalsIgnoreCase(it.type)})
                     Map strategyOptions=it.spec.strategy.sourceStrategy?:it.spec.strategy.dockerStrategy
@@ -113,7 +132,9 @@ class OpenShiftHelper{
                         if (it.metadata.labels['tree-hash']){
                             strategyOptions.env.add(['name':"OPENSHIFT_BUILD_TREE_HASH", 'value':"${it.metadata.labels['tree-hash']}"])
                         }
-                        strategyOptions.from.namespace=strategyOptions.from.namespace?:templateConfig.namespace
+                        if ('DockerImage' != strategyOptions.from.kind) {
+                            strategyOptions.from.namespace = strategyOptions.from.namespace ?: templateConfig.namespace
+                        }
                     }
                     //println groovy.json.JsonOutput.toJson(it.spec.triggers)
                 }else if ('ImageStream'.equalsIgnoreCase(it.kind)){
@@ -137,7 +158,7 @@ class OpenShiftHelper{
     public static Map _exec(List args){
         return _exec(args, new StringBuffer(), new StringBuffer())
     }
-    public boolean waitForPodsToComplete(List ocGetAgs){
+    static public boolean waitForPodsToComplete(List ocGetAgs){
         int inprogress=1
         boolean hasFailed=false;
 
@@ -238,6 +259,7 @@ class OpenShiftHelper{
         String json=new groovy.json.JsonBuilder(['kind':'List', 'apiVersion':'v1', 'items':items]).toPrettyString()
 
 
+        //println new groovy.json.JsonBuilder(items).toPrettyString()
         Map ret = _exec(_args, new StringBuffer(), new StringBuffer(), {OutputStream out -> out.write(json.getBytes());})
 
 
@@ -278,6 +300,14 @@ class OpenShiftHelper{
         strategyConfig.env=strategyConfig.env?:[]
 
         strategyConfig.env.add(env)
+    }
+    public static Map loadBuildConfig(OptionAccessor opt){
+        def configSlurper = new ConfigSlurper("build")
+        configSlurper.setBinding(['opt': opt])
+
+        def config = configSlurper.parse(new File(opt.c).toURI().toURL())
+
+        return config
     }
     public static Map loadDeploymentConfig(OptionAccessor opt){
         println "Loading configuration file for '${opt.e}' ${opt.'pr'}"
