@@ -13,6 +13,8 @@
         <bintray.subject>cvarjao</bintray.subject>
         <bintray.repo>maven</bintray.repo>
         <bintray.package>ca.bc.gov.devops.cd.pipeline</bintray.package>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
     </properties>
 
     <dependencies>
